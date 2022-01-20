@@ -256,6 +256,7 @@ class VisionTransformer(nn.Module):
         self.classifier = nn.Linear(emb_dim, num_classes)
 
     def forward(self, x):
+        flow._oneflow_internal.profiler.RangePush('pos_embed!')
         emb = self.embedding(x)  # (n, c, gh, gw)
         emb = emb.permute(0, 2, 3, 1)  # (n, gh, hw, c)
         b, h, w, c = emb.shape
@@ -264,12 +265,16 @@ class VisionTransformer(nn.Module):
         # prepend class token
         cls_token = self.cls_token.repeat(b, 1, 1)
         emb = flow.cat([cls_token, emb], dim=1)
-
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('transform encoder!')
         # transformer
         feat = self.transformer(emb)
+        flow._oneflow_internal.profiler.RangePop()
 
         # classifier
+        flow._oneflow_internal.profiler.RangePush('cls head!')
         logits = self.classifier(feat[:, 0])
+        flow._oneflow_internal.profiler.RangePop()
         return logits
 
 

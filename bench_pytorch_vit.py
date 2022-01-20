@@ -1,5 +1,8 @@
 from typing import Callable
 
+import time
+import datetime
+
 import numpy as np
 from lib.torch_vit import vit_base_patch16_224
 import torch
@@ -16,15 +19,20 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
     x_of = x_of.to(device)
     y_of = y_of.to(device)
 
-    with tqdm(total=n * batch_size) as pbar:
-        for _ in range(n):
+    #warm up
+    for _ in range(5):
+        loss, output = forward_and_backward(x_of, y_of)
+        t_loss = loss.item()
 
-            loss, output = forward_and_backward(x_of, y_of)
-
-            loss.item()
-
-            pbar.update(batch_size)
-
+    start_time = time.time()
+    torch.cuda.nvtx.range_push('torch vit train begin')
+    for _ in range(n):
+        loss, output = forward_and_backward(x_of, y_of)
+        t_loss = loss.item()
+    torch.cuda.nvtx.range_pop()
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print(total_time_str)
 
 class VitTrainGraph:
 
@@ -35,10 +43,18 @@ class VitTrainGraph:
         self.optimizer = optimizer
 
     def __call__(self, x, y):
+        torch.cuda.nvtx.range_push('forward')
         y_pred = self.model(x)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('loss')
         loss = self.criterion(y_pred, y)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('param update')
         self.optimizer.zero_grad()
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('backward')
         loss.backward()
+        torch.cuda.nvtx.range_pop()
         self.optimizer.step()
         return loss, y_pred
 
@@ -68,7 +84,7 @@ def main():
 
     # bench(model_graph, x, y, n=10)
 
-    bench(model_graph, x, y, n=100)
+    bench(model_graph, x, y, n=20)
 
 
 if __name__ == '__main__':

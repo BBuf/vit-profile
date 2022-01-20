@@ -3,3 +3,5 @@ log/
 *.qdrep
 __pycache__/
 *.pyc
+*.qdstrm
+*.sqlite
