@@ -27,7 +27,9 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
     start_time = time.time()
     for _ in range(n):
         loss, output = forward_and_backward(x_of, y_of)
+        torch.cuda.nvtx.range_push('loss item')
         t_loss = loss.item()
+        torch.cuda.nvtx.range_pop()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
@@ -82,7 +84,7 @@ def main():
 
     # bench(model_graph, x, y, n=10)
 
-    bench(model_graph, x, y, n=200)
+    bench(model_graph, x, y, n=20)
 
 
 if __name__ == '__main__':

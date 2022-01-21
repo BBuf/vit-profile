@@ -206,16 +206,44 @@ class Attention(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        torch.cuda.nvtx.range_push('linear')
+        qkv = self.qkv(x)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('reshape')
+        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('permute')
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        torch.cuda.nvtx.range_pop()
+        
+        torch.cuda.nvtx.range_push('unbind')
         q, k, v = qkv.unbind(0)   # make torchscript happy (cannot use tensor as tuple)
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('matmul transpose')
+        attn = (q @ k.transpose(-2, -1))
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('scalar multiply')
+        attn = attn * self.scale
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('softmax')
         attn = attn.softmax(dim=-1)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('dropout')
         attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('matmul')
+        x = (attn @ v)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('transpose')
+        x = x.transpose(1, 2)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('reshape')
+        x = x.reshape(B, N, C)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('linear + dropout')
         x = self.proj(x)
         x = self.proj_drop(x)
+        torch.cuda.nvtx.range_pop()
         return x
 
 
@@ -233,10 +261,33 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        torch.cuda.nvtx.range_push('encoder block!')
+        torch.cuda.nvtx.range_push('attn-layernorm!')
+        torch.cuda.nvtx.range_push('layernorm1!')
+        res = self.norm1(x)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('attn!')
+        res = self.attn(res)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('dropout1!')
+        res = self.drop_path(res)
+        torch.cuda.nvtx.range_pop()
+        x = x + res
+        # x = x + self.drop_path(self.attn(self.norm1(x)))
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('mlp-layernorm!')
+        torch.cuda.nvtx.range_push('layernorm2!')
+        res = self.norm2(x)
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_push('mlp!')
+        res = self.mlp(res)
+        torch.cuda.nvtx.range_pop()
+        res = self.drop_path(res)
+        x = x + res
+        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.range_pop()
         return x
-
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer

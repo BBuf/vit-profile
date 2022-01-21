@@ -11,12 +11,36 @@ import oneflow as flow
 import oneflow.nn as nn
 import oneflow.nn.functional as F
 
-from flowvision.layers.blocks import PatchEmbed, Mlp
+from flowvision.layers.blocks import PatchEmbed
 from flowvision.layers.regularization import DropPath
 # from flowvision.layers.weight_init import trunc_normal_, lecun_normal_
 from flowvision.models.utils import load_state_dict_from_url
 from flowvision.models.registry import ModelCreator
 
+class Mlp(nn.Module):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.GELU,
+        drop=0.0,
+    ):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
 
 model_urls = {
     "vit_tiny_patch16_224": "https://oneflow-public.oss-cn-beijing.aliyuncs.com/model_zoo/flowvision/classification/VisionTransformer/vit_tiny_patch16_224.zip",
@@ -48,19 +72,44 @@ class Attention(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        # TODO supported tensor.unbind in oneflow
-        # q, k, v = qkv.unbind(0)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        flow._oneflow_internal.profiler.RangePush('linear')
+        qkv = self.qkv(x)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('reshape')
+        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('permute')
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        flow._oneflow_internal.profiler.RangePop()
         
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        flow._oneflow_internal.profiler.RangePush('unbind')
+        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('matmul transpose')
+        attn = (q @ k.transpose(-2, -1))
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('scalar multiply')
+        attn = attn * self.scale
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('softmax')
         attn = attn.softmax(dim=-1)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('dropout')
         attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('matmul')
+        x = (attn @ v)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('transpose')
+        x = x.transpose(1, 2)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('reshape')
+        x = x.reshape(B, N, C)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('linear + dropout')
         x = self.proj(x)
         x = self.proj_drop(x)
+        flow._oneflow_internal.profiler.RangePop()
         return x
 
 
@@ -78,10 +127,33 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        flow._oneflow_internal.profiler.RangePush('encoder block!')
+        flow._oneflow_internal.profiler.RangePush('attn-layernorm!')
+        flow._oneflow_internal.profiler.RangePush('layernorm1!')
+        res = self.norm1(x)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('attn!')
+        res = self.attn(res)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('dropout1!')
+        res = self.drop_path(res)
+        flow._oneflow_internal.profiler.RangePop()
+        x = x + res
+        # x = x + self.drop_path(self.attn(self.norm1(x)))
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('mlp-layernorm!')
+        flow._oneflow_internal.profiler.RangePush('layernorm2!')
+        res = self.norm2(x)
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePush('mlp!')
+        res = self.mlp(res)
+        flow._oneflow_internal.profiler.RangePop()
+        res = self.drop_path(res)
+        x = x + res
+        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        flow._oneflow_internal.profiler.RangePop()
+        flow._oneflow_internal.profiler.RangePop()
         return x
-
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer
