@@ -1,11 +1,14 @@
 from typing import Callable
 
+import time
+import datetime
+
 import numpy as np
 import oneflow
 from oneflow import nn
 from tqdm import tqdm, trange
 
-from lib.vit import ViT_B_16_224
+from lib.vit import vit_base_patch16_224
 
 
 def bench(forward_and_backward: Callable, x, y, n=1000):
@@ -17,15 +20,18 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
     x_of = x_of.to(device)
     y_of = y_of.to(device)
 
-    with tqdm(total=n * batch_size) as pbar:
-        for _ in range(n):
+    #warm up
+    for _ in range(5):
+        loss, output = forward_and_backward(x_of, y_of)
+        t_loss = loss.item()
 
-            loss, output = forward_and_backward(x_of, y_of)
-
-            loss.item()
-
-            pbar.update(batch_size)
-
+    start_time = time.time()
+    for _ in range(n):
+        loss, output = forward_and_backward(x_of, y_of)
+        t_loss = loss.item()
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print(total_time_str)
 
 class VitTrainGraph(nn.Graph):
 
@@ -52,7 +58,7 @@ def main():
     np.random.seed(42)
 
     device = oneflow.device('cuda')
-    vit = ViT_B_16_224()
+    vit = vit_base_patch16_224()
     # from flowvision.models.vit import vit_b_16_224
     # vit = vit_b_16_224()
     vit.to(device)
@@ -66,9 +72,9 @@ def main():
 
     # model_graph.debug()
 
-    bench(model_graph, x, y, n=10)
+    # bench(model_graph, x, y, n=10)
 
-    bench(model_graph, x, y, n=100)
+    bench(model_graph, x, y, n=200)
 
 
 if __name__ == '__main__':

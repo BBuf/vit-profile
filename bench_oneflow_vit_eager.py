@@ -4,7 +4,7 @@ import time
 import datetime
 
 import numpy as np
-from lib.vit import ViT_B_16_224
+from lib.vit import vit_base_patch16_224
 import oneflow as flow
 from oneflow import nn
 from tqdm import tqdm, trange
@@ -24,11 +24,9 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
         t_loss = loss.item()
 
     start_time = time.time()
-    flow._oneflow_internal.profiler.RangePush('oneflow vit train begin')
     for _ in range(n):
         loss, output = forward_and_backward(x_of, y_of)
         t_loss = loss.item()
-    flow._oneflow_internal.profiler.RangePop()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
@@ -64,7 +62,7 @@ def main():
     np.random.seed(42)
 
     device = flow.device('cuda')
-    vit = ViT_B_16_224()
+    vit = vit_base_patch16_224()
 
     # from lib.timm_vit import vit_base_patch16_224_bench
     # vit = vit_base_patch16_224_bench()
@@ -82,7 +80,7 @@ def main():
 
     # bench(model_graph, x, y, n=10)
 
-    bench(model_graph, x, y, n=20)
+    bench(model_graph, x, y, n=200)
 
 
 if __name__ == '__main__':

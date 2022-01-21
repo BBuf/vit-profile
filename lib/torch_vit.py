@@ -311,20 +311,15 @@ class VisionTransformer(nn.Module):
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x):
-        torch.cuda.nvtx.range_push('pos_embed!')
         x = self.patch_embed(x)
-
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_token is None:
             x = torch.cat((cls_token, x), dim=1)
         else:
             x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
         x = self.pos_drop(x + self.pos_embed)
-        torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push('transform encoder!')
         x = self.blocks(x)
         x = self.norm(x)
-        torch.cuda.nvtx.range_pop()
         if self.dist_token is None:
             return self.pre_logits(x[:, 0])
         else:
@@ -332,7 +327,6 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x):
         x = self.forward_features(x)
-        torch.cuda.nvtx.range_push('cls head!')
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
             if self.training and not torch.jit.is_scripting():
@@ -342,7 +336,6 @@ class VisionTransformer(nn.Module):
                 return (x + x_dist) / 2
         else:
             x = self.head(x)
-        torch.cuda.nvtx.range_pop()
         return x
 
 
@@ -455,4 +448,3 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
-
