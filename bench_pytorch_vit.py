@@ -25,11 +25,13 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
         t_loss = loss.item()
 
     start_time = time.time()
+    torch.cuda.nvtx.range_push('torch vit train begin')
     for _ in range(n):
         loss, output = forward_and_backward(x_of, y_of)
         torch.cuda.nvtx.range_push('loss item')
         t_loss = loss.item()
         torch.cuda.nvtx.range_pop()
+    torch.cuda.nvtx.range_pop()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
@@ -60,7 +62,7 @@ class VitTrainGraph:
 
 
 def main():
-    batch_size = 64
+    batch_size = 32
 
     np.random.seed(42)
 

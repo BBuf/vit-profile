@@ -44,7 +44,7 @@ class VitEvalGraph:
 
 
 def main():
-    batch_size = 64
+    batch_size = 32
 
     np.random.seed(42)
 

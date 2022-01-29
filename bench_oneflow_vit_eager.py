@@ -24,12 +24,13 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
         t_loss = loss.item()
 
     start_time = time.time()
-    
+    flow._oneflow_internal.profiler.RangePush('oneflow no loss.item vit train begin')
     for _ in range(n):
         loss, output = forward_and_backward(x_of, y_of)
         flow._oneflow_internal.profiler.RangePush('loss item')
         t_loss = loss.item()
         flow._oneflow_internal.profiler.RangePop()
+    flow._oneflow_internal.profiler.RangePop()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
@@ -60,7 +61,7 @@ class VitTrainGraph:
 
 
 def main():
-    batch_size = 64
+    batch_size = 32
 
     np.random.seed(42)
 
@@ -83,7 +84,7 @@ def main():
 
     # bench(model_graph, x, y, n=10)
 
-    bench(model_graph, x, y, n=200)
+    bench(model_graph, x, y, n=20)
 
 
 if __name__ == '__main__':
