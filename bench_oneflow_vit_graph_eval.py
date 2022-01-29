@@ -11,31 +11,25 @@ from tqdm import tqdm, trange
 from lib.vit import vit_base_patch16_224
 
 
-def bench(forward_and_backward: Callable,  n=1000):
+def bench(forward: Callable,  n=1000):
     #warm up
     for _ in range(5):
-        loss, output = forward_and_backward()
-        t_loss = loss.item()
+        output = forward()
 
     start_time = time.time()
     for _ in range(n):
-        loss, output = forward_and_backward()
-        t_loss = loss.item()
+        output = forward()
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
 
-class VitTrainGraph(nn.Graph):
+class VitEvalGraph(nn.Graph):
 
-    def __init__(self, model, optimizer):
+    def __init__(self, model):
         super().__init__()
         self.model = model
-        self.criterion = nn.CrossEntropyLoss()
 
-        self.config.allow_fuse_add_to_output()
-        self.config.allow_fuse_model_update_ops()
-
-        self.add_optimizer(optimizer)
 
     def build(self):
         batch_size = 64
@@ -43,9 +37,7 @@ class VitTrainGraph(nn.Graph):
         y = oneflow.randint(0, 1000, (batch_size,)).to(oneflow.device('cuda'))
 
         y_pred = self.model(x)
-        loss = self.criterion(y_pred, y)
-        loss.backward()
-        return loss, y_pred
+        return y_pred
 
 
 def main():
@@ -59,13 +51,11 @@ def main():
     # vit = vit_b_16_224()
     vit.to(device)
 
-    optimizer = oneflow.optim.SGD(vit.parameters())
-
-    model_graph = VitTrainGraph(vit, optimizer)
+    model_graph = VitEvalGraph(vit)
 
     # model_graph.debug()
 
-    # bench(model_graph, x, y, n=10)
+    # bench(model_graph, n=10)
 
     bench(model_graph, n=200)
 

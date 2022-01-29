@@ -11,7 +11,7 @@ from torch.backends import cudnn
 from tqdm import tqdm, trange
 
 
-def bench(forward_and_backward: Callable, x, y, n=1000):
+def bench(forward: Callable, x, y, n=1000):
     batch_size = x.shape[0]
     device = torch.device('cuda')
     x_of = torch.tensor(x)
@@ -21,42 +21,26 @@ def bench(forward_and_backward: Callable, x, y, n=1000):
 
     #warm up
     for _ in range(5):
-        loss, output = forward_and_backward(x_of, y_of)
-        t_loss = loss.item()
+        output = forward(x_of, y_of)
 
     start_time = time.time()
     for _ in range(n):
-        loss, output = forward_and_backward(x_of, y_of)
-        torch.cuda.nvtx.range_push('loss item')
-        t_loss = loss.item()
-        torch.cuda.nvtx.range_pop()
+        output = forward(x_of, y_of)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(total_time_str)
 
-class VitTrainGraph:
+class VitEvalGraph:
 
-    def __init__(self, model, optimizer):
+    def __init__(self, model):
         super().__init__()
         self.model = model
-        self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optimizer
 
     def __call__(self, x, y):
         torch.cuda.nvtx.range_push('forward')
         y_pred = self.model(x)
         torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push('loss')
-        loss = self.criterion(y_pred, y)
-        torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push('param update')
-        self.optimizer.zero_grad()
-        torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push('backward')
-        loss.backward()
-        torch.cuda.nvtx.range_pop()
-        self.optimizer.step()
-        return loss, y_pred
+        return y_pred
 
 
 def main():
@@ -75,12 +59,11 @@ def main():
 
     vit.to(device)
 
-    optimizer = torch.optim.SGD(vit.parameters(), lr=0.001)
 
     x = np.random.rand(batch_size, 3, 224, 224).astype(np.float32)
     y = np.random.randint(0, 1000, (batch_size,))
 
-    model_graph = VitTrainGraph(vit, optimizer)
+    model_graph = VitEvalGraph(vit)
 
     # bench(model_graph, x, y, n=10)
 
